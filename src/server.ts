@@ -7,24 +7,20 @@ const {ErrorCode, Stage} = Consts;
 
 
 
-
 interface SyncCall {(...args:any[]):any};
 interface AsyncCall {(...args:any[]):Promise<any>};
 export interface CallMap {[func:string]:SyncCall|AsyncCall};
+
 interface ServerSocketListenOptions {port:number; host?:string;};
 interface ServerPathListenOptions {path:string;};
 export type ServerListenOptions = ServerSocketListenOptions | ServerPathListenOptions;
 
-export interface ServerInitOptions {
-	max_body?:number;
-}
-
+export interface ServerInitOptions { max_body?:number; }
 interface ServerPrivates {
 	callmap:CallMap;
 	server:http.Server;
 	max_body:number;
 }
-
 
 export interface TRPCRequest {
 	rpc:"1.0",
@@ -32,11 +28,13 @@ export interface TRPCRequest {
 	call:string;
 	args:any[]
 };
+
 export interface TRPCSuccResp {
 	rpc:"1.0",
 	id:string|number;
 	ret?:any;
 };
+
 export interface TRPCErrorResp {
 	rpc:"1.0",
 	id?:string|number;
@@ -47,6 +45,7 @@ export interface TRPCErrorResp {
 		detail?:{};
 	}
 };
+
 
 
 const _Server:WeakMap<Server, ServerPrivates> = new WeakMap();
@@ -91,6 +90,7 @@ export class Server extends events.EventEmitter {
 };
 
 
+
 function BindServerEvents(this:Server, server:http.Server) {
 	const __Server = _Server.get(this)!;
 	server.on('request', (req, res)=>{
@@ -132,9 +132,8 @@ function BindServerEvents(this:Server, server:http.Server) {
 			// Parse content according to Content-Type header
 			let payload:TRPCRequest, mime:'application/json'|'application/beson';
 			{
-				const raw_content_type = req.headers['Content-Type']||'';
+				const raw_content_type = req.headers['content-type']||'';
 				const content_type = parseContentTypeHeader(Array.isArray(raw_content_type)?raw_content_type[0]:raw_content_type);
-				
 				if ( content_type.mime === "application/json" ) {
 					mime = content_type.mime;
 
@@ -204,7 +203,7 @@ function BindServerEvents(this:Server, server:http.Server) {
 					errors.push('Invalid rpc protocol');
 				}
 
-				if ( typeof payload.id !== "string" || typeof payload.id !== "number" ) {
+				if ( typeof payload.id !== "string" && typeof payload.id !== "number" ) {
 					errors.push('Invalid request id');
 				}
 
@@ -226,6 +225,7 @@ function BindServerEvents(this:Server, server:http.Server) {
 							detail: errors
 						}
 					});
+					return;
 				}
 			}
 
