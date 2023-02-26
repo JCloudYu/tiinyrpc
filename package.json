@@ -4,12 +4,21 @@
 	"description": "An small rpc server base on tinyrpc protocol",
 	"main": "dist/index.js",
 	"scripts": {
+		"prebuild": "rm -rf ./_dist",
 		"build": "tsc"
 	},
 	"keywords": [
 		"TinyRPC",
 		"TRPC"
 	],
+	"engines": {
+		"node": ">=12",
+		"npm": ">=6.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/JCloudYu/tiinytrpc.git"
+	},
 	"author": "JCloudYu",
 	"license": "ISC",
 	"devDependencies": {

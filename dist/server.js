@@ -86,7 +86,7 @@ function BindServerEvents(server) {
             // Parse content according to Content-Type header
             let payload, mime;
             {
-                const raw_content_type = req.headers['Content-Type'] || '';
+                const raw_content_type = req.headers['content-type'] || '';
                 const content_type = parseContentTypeHeader(Array.isArray(raw_content_type) ? raw_content_type[0] : raw_content_type);
                 if (content_type.mime === "application/json") {
                     mime = content_type.mime;
@@ -151,7 +151,7 @@ function BindServerEvents(server) {
                 if (payload.rpc !== "1.0") {
                     errors.push('Invalid rpc protocol');
                 }
-                if (typeof payload.id !== "string" || typeof payload.id !== "number") {
+                if (typeof payload.id !== "string" && typeof payload.id !== "number") {
                     errors.push('Invalid request id');
                 }
                 if (!payload.call || typeof payload.call !== "string") {
@@ -170,6 +170,7 @@ function BindServerEvents(server) {
                             detail: errors
                         }
                     });
+                    return;
                 }
             }
             const func = __Server.callmap[payload.call];
