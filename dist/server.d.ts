@@ -56,7 +56,10 @@ export interface TRPCErrorResp {
     };
 }
 export default class Server extends events.EventEmitter {
-    constructor(callmap: CallMap, options: ServerInitOptions);
+    static init(callmap: CallMap, options?: ServerInitOptions): Server;
+    constructor(callmap: CallMap, options?: ServerInitOptions);
+    insert(call: string, handler: SyncCall | AsyncCall): this;
+    remove(call: string): this;
     listen(options: ServerListenOptions): Promise<string | net.AddressInfo>;
 }
 export {};

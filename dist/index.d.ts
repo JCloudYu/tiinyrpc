@@ -1,4 +1,4 @@
-import Server = require("./server.js");
+import Server from "./server.js";
 declare const _default: Readonly<{
     Server: typeof Server;
 } & {

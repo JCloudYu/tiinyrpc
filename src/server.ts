@@ -50,9 +50,13 @@ export interface TRPCErrorResp {
 
 const _Server:WeakMap<Server, ServerPrivates> = new WeakMap();
 export default class Server extends events.EventEmitter {
-	constructor(callmap:CallMap, options:ServerInitOptions) {
+	static init(callmap:CallMap, options?:ServerInitOptions):Server {
+		return new Server(callmap, options);
+	}
+	constructor(callmap:CallMap, options?:ServerInitOptions) {
 		super();
-
+		
+		options = (options && Object(options) === options) ? options : {};
 		const server = http.createServer();
 		_Server.set(this, {
 			callmap, server,
@@ -60,6 +64,14 @@ export default class Server extends events.EventEmitter {
 		});
 
 		BindServerEvents.call(this, server);
+	}
+	insert(call:string, handler:SyncCall|AsyncCall) {
+		_Server.get(this)!.callmap[call] = handler;
+		return this;
+	}
+	remove(call:string) {
+		delete _Server.get(this)!.callmap[call];
+		return this;
 	}
 	listen(options:ServerListenOptions):Promise<string|net.AddressInfo> {
 		const server = _Server.get(this)!.server;

@@ -15,14 +15,26 @@ const { ErrorCode, Stage } = Consts;
 ;
 const _Server = new WeakMap();
 class Server extends events.EventEmitter {
+    static init(callmap, options) {
+        return new Server(callmap, options);
+    }
     constructor(callmap, options) {
         super();
+        options = (options && Object(options) === options) ? options : {};
         const server = http.createServer();
         _Server.set(this, {
             callmap, server,
             max_body: options.max_body || 0
         });
         BindServerEvents.call(this, server);
+    }
+    insert(call, handler) {
+        _Server.get(this).callmap[call] = handler;
+        return this;
+    }
+    remove(call) {
+        delete _Server.get(this).callmap[call];
+        return this;
     }
     listen(options) {
         const server = _Server.get(this).server;
