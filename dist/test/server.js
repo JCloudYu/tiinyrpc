@@ -1,10 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-const srv = require("../server.js");
+const server_js_1 = require("../server.js");
 const req = require("../client.js");
 Promise.resolve().then(async () => {
-    const { Server } = srv;
-    const server = new Server({
+    const server = new server_js_1.default({
         hi: (name) => {
             return `Hi! ${name}!`;
         }

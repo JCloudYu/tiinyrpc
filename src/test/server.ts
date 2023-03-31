@@ -1,8 +1,7 @@
-import srv = require('../server.js');
+import Server from '../server.js';
 import req = require('../client.js');
 
 Promise.resolve().then(async()=>{
-	const {Server} = srv;
 	const server = new Server({
 		hi:(name:string)=>{
 			return `Hi! ${name}!`;

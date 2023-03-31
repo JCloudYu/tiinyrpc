@@ -1,6 +1,5 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Server = void 0;
 const http = require("http");
 const events = require("events");
 const beson = require("beson");
@@ -47,7 +46,7 @@ class Server extends events.EventEmitter {
         });
     }
 }
-exports.Server = Server;
+exports.default = Server;
 ;
 function BindServerEvents(server) {
     const __Server = _Server.get(this);

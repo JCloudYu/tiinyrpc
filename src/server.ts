@@ -49,7 +49,7 @@ export interface TRPCErrorResp {
 
 
 const _Server:WeakMap<Server, ServerPrivates> = new WeakMap();
-export class Server extends events.EventEmitter {
+export default class Server extends events.EventEmitter {
 	constructor(callmap:CallMap, options:ServerInitOptions) {
 		super();
 

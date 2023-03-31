@@ -55,7 +55,7 @@ export interface TRPCErrorResp {
         detail?: {};
     };
 }
-export declare class Server extends events.EventEmitter {
+export default class Server extends events.EventEmitter {
     constructor(callmap: CallMap, options: ServerInitOptions);
     listen(options: ServerListenOptions): Promise<string | net.AddressInfo>;
 }
