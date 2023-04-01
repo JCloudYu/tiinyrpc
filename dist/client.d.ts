@@ -1,9 +1,16 @@
 /// <reference types="node" />
-import http = require('http');
-interface ReqInfo {
-    headers?: http.OutgoingHttpHeaders;
+import http from 'http';
+export interface ClientInitOptions {
+    url: string;
     timeout?: number;
+    headers?: http.OutgoingHttpHeaders;
 }
-declare function Request<ReturnType = any>(info: ReqInfo, url: string, call: string, ...args: any[]): Promise<ReturnType>;
-declare function Request<ReturnType = any>(url: string, call: string, ...args: any[]): Promise<ReturnType>;
-export = Request;
+export declare class Client {
+    static init(options: ClientInitOptions): Client;
+    constructor(options: ClientInitOptions);
+    get timeout(): number;
+    set timeout(v: number);
+    get headers(): http.OutgoingHttpHeaders;
+    mutate(overwrites: Omit<ClientInitOptions, 'url'>): Client;
+    invoke<ReturnType = any>(call: string, ...args: any[]): Promise<ReturnType>;
+}

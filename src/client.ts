@@ -1,23 +1,73 @@
-import TrimId = require("./trimid.js");
-import http = require('http');
-import https = require('https');
+import http from 'http';
+import https from 'https';
+import {TrimId} from "./trimid.js";
+
+
+const DEFAULT_TIMEOUT = 5_000;
+
+
+export interface ClientInitOptions {
+	url:string;
+	timeout?:number;
+	headers?:http.OutgoingHttpHeaders;
+};
 
 
 
-interface ReqInfo { headers?:http.OutgoingHttpHeaders; timeout?:number; }
-function Request<ReturnType=any>(info:ReqInfo, url:string, call:string, ...args:any[]):Promise<ReturnType>
-function Request<ReturnType=any>(url:string, call:string, ...args:any[]):Promise<ReturnType>;
-function Request<ReturnType=any>(arg1:string|ReqInfo, arg2:string, ...args:any[]):Promise<ReturnType> {
-	let timeout:number, headers:http.OutgoingHttpHeaders, url:string, call:string;
+interface ClientPrivates {timeout:number; url:string; headers:http.OutgoingHttpHeaders;};
+const _Client:WeakMap<Client, ClientPrivates> = new WeakMap();
+
+export class Client {
+	static init(options:ClientInitOptions):Client { return new Client(options); }
+
+	constructor(options:ClientInitOptions) {
+		_Client.set(this, {
+			url:options.url,
+			timeout:typeof options.timeout === "number" ? options.timeout : DEFAULT_TIMEOUT,
+			headers: Object.assign({}, options.headers)
+		});
+	}
+
+	get timeout() { return _Client.get(this)!.timeout; }
+	set timeout(v:number) {
+		if ( typeof v !== "number") 
+			throw new TypeError("Property timeout only accept integers!"); 
+		_Client.get(this)!.timeout = v; 
+	}
+	get headers() { return _Client.get(this)!.headers; }
+
+	mutate(overwrites:Omit<ClientInitOptions, 'url'>):Client {
+		const curr = _Client.get(this)!;
+		const new_client = new Client({url:''});
+		Object.assign(_Client.get(new_client)!, overwrites, {url:curr.url});
+		return new_client;
+	}
+
+	invoke<ReturnType=any>(call:string, ...args:any[]):Promise<ReturnType> {
+		const {headers, timeout, url} = _Client.get(this)!;
+		return TRPCCall<ReturnType>({headers, timeout, url}, call, args);
+	}
+}
+
+
+
+
+interface ReqInfo { url?:string; headers?:http.OutgoingHttpHeaders; timeout?:number; }
+function TRPCCall<ReturnType=any>(url:string, call:string, args:any[]):Promise<ReturnType>;
+function TRPCCall<ReturnType=any>(info:ReqInfo, call:string, args:any[]):Promise<ReturnType>
+function TRPCCall<ReturnType=any>(arg1:string|ReqInfo, call:string, args:any[]):Promise<ReturnType> {
+	let timeout:number, headers:http.OutgoingHttpHeaders, url:string;
 	if ( typeof arg1 === "string" ) {
 		url = arg1;
-		call = arg2;
+		headers = {};
+		timeout = 0;
 	}
 	else {
+		if ( typeof arg1.url !== "string" || !arg1.url ) { throw new Error("Field url is required!"); }
+
+		url = arg1.url;
 		timeout = arg1.timeout||0;
 		headers = arg1.headers||{};
-		url = arg2;
-		call = args.shift();
 	}
 
 	return new Promise<ReturnType>((resolve, reject)=>{
@@ -73,4 +123,3 @@ function Request<ReturnType=any>(arg1:string|ReqInfo, arg2:string, ...args:any[]
 		req.end(body);
 	});
 }
-export = Request;

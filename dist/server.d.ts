@@ -1,19 +1,10 @@
 /// <reference types="node" />
 /// <reference types="node" />
-import events = require('events');
-import type net = require('net');
-declare const ErrorCode: Readonly<{
-    readonly UNSUPPORTED_METHOD: "rpc#unsupported-method";
-    readonly PAYLOAD_IS_TOO_LARGE: "rpc#payload-is-too-large";
-    readonly INVALID_PAYLOAD_FORMAT: "rpc#invalid-payload-format";
-    readonly CALL_NOT_FOUND: "rpc#call-not-found";
-    readonly CALL_EXEC_ERROR: "rpc#call-exec-error";
-    readonly UNEXPECTED_ERROR: "rpc#unexpected-error";
-}>, Stage: Readonly<{
-    readonly PAYLOAD_PARSER: "stage#payload-parser";
-    readonly CALL_EXEC: "stage#call-exec";
-    readonly UNKNOWN: "stage#unknown";
-}>;
+/// <reference types="node" />
+import http from 'http';
+import events from 'events';
+import type net from 'net';
+import { ErrorCode, Stage } from './consts.js';
 interface SyncCall {
     (...args: any[]): any;
 }
@@ -31,7 +22,11 @@ interface ServerPathListenOptions {
     path: string;
 }
 export declare type ServerListenOptions = ServerSocketListenOptions | ServerPathListenOptions;
+export declare type RequestPreprocessor = {
+    (req: http.IncomingMessage, payload: TRPCRequest): true | any | Promise<true | any>;
+};
 export interface ServerInitOptions {
+    audit?: RequestPreprocessor;
     max_body?: number;
 }
 export interface TRPCRequest {
@@ -55,11 +50,13 @@ export interface TRPCErrorResp {
         detail?: {};
     };
 }
-export default class Server extends events.EventEmitter {
+export declare class Server extends events.EventEmitter {
     static init(callmap: CallMap, options?: ServerInitOptions): Server;
     constructor(callmap: CallMap, options?: ServerInitOptions);
+    get is_listening(): boolean;
     insert(call: string, handler: SyncCall | AsyncCall): this;
     remove(call: string): this;
     listen(options: ServerListenOptions): Promise<string | net.AddressInfo>;
+    release(): Promise<void>;
 }
 export {};

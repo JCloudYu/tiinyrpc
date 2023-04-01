@@ -1,9 +1,8 @@
-import http = require('http');
-import events = require('events');
-import beson = require('beson');
-import type net = require('net');
-import Consts = require('./consts.js');
-const {ErrorCode, Stage} = Consts;
+import http from 'http';
+import events from 'events';
+import beson from 'beson';
+import type net from 'net';
+import {ErrorCode, Stage} from './consts.js';
 
 
 
@@ -15,26 +14,22 @@ interface ServerSocketListenOptions {port:number; host?:string;};
 interface ServerPathListenOptions {path:string;};
 export type ServerListenOptions = ServerSocketListenOptions | ServerPathListenOptions;
 
-export interface ServerInitOptions { max_body?:number; }
-interface ServerPrivates {
-	callmap:CallMap;
-	server:http.Server;
-	max_body:number;
+export type RequestPreprocessor = {(req:http.IncomingMessage, payload:TRPCRequest):true|any|Promise<true|any>};
+export interface ServerInitOptions {
+	audit?:RequestPreprocessor;
+	max_body?:number;
 }
-
 export interface TRPCRequest {
 	rpc:"1.0",
 	id:string|number;
 	call:string;
 	args:any[]
 };
-
 export interface TRPCSuccResp {
 	rpc:"1.0",
 	id:string|number;
 	ret?:any;
 };
-
 export interface TRPCErrorResp {
 	rpc:"1.0",
 	id?:string|number;
@@ -47,9 +42,14 @@ export interface TRPCErrorResp {
 };
 
 
-
+interface ServerPrivates {
+	callmap:CallMap;
+	server:http.Server;
+	max_body:number;
+	auditor:RequestPreprocessor;
+}
 const _Server:WeakMap<Server, ServerPrivates> = new WeakMap();
-export default class Server extends events.EventEmitter {
+export class Server extends events.EventEmitter {
 	static init(callmap:CallMap, options?:ServerInitOptions):Server {
 		return new Server(callmap, options);
 	}
@@ -57,14 +57,20 @@ export default class Server extends events.EventEmitter {
 		super();
 		
 		options = (options && Object(options) === options) ? options : {};
+		if ( options.audit !== undefined && typeof options.audit !== "function" ) {
+			throw new TypeError("Input preprocess field must be a function!");
+		}
+
 		const server = http.createServer();
 		_Server.set(this, {
 			callmap, server,
-			max_body:options.max_body||0
+			max_body:options.max_body||0,
+			auditor:options.audit||DefaultPreprocessor
 		});
 
 		BindServerEvents.call(this, server);
 	}
+	get is_listening() { return _Server.get(this)!.server.listening; }
 	insert(call:string, handler:SyncCall|AsyncCall) {
 		_Server.get(this)!.callmap[call] = handler;
 		return this;
@@ -99,10 +105,16 @@ export default class Server extends events.EventEmitter {
 			}
 		});
 	}
+	release():Promise<void> {
+		return new Promise((res, rej)=>{
+			_Server.get(this)!.server.close((err)=>err?rej(err):res());
+		});
+	}
 };
 
 
 
+function DefaultPreprocessor() {}
 function BindServerEvents(this:Server, server:http.Server) {
 	const __Server = _Server.get(this)!;
 	server.on('request', (req, res)=>{
@@ -242,6 +254,21 @@ function BindServerEvents(this:Server, server:http.Server) {
 			}
 
 			
+			const auditor = __Server.auditor;
+			const is_go = await auditor(req, payload);
+			if ( is_go !== true ) {
+				WriteResponse(res, 403, mime, {
+					rpc:"1.0",
+					error: {
+						stage:Stage.CALL_AUDIT,
+						code: ErrorCode.INVALID_PAYLOAD_FORMAT,
+						message: "You're not allowed to perform this operation!",
+						detail: { info:is_go }
+					}
+				});
+				return;
+			}
+
 
 			const func = __Server.callmap[payload.call];
 			if ( typeof func !== "function" ) {

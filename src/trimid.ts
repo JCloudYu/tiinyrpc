@@ -2,7 +2,7 @@
  *	Author: JCloudYu
  *	Create: 2020/06/28
 **/
-export = (()=>{
+export const TrimId = (()=>{
 	"use strict";
 	
 	// See http://www.isthe.com/chongo/tech/comp/fnv/#FNV-param for the definition of these parameters;

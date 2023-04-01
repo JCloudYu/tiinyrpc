@@ -1,5 +1,11 @@
 "use strict";
-module.exports = (() => {
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.TrimId = void 0;
+/**
+ *	Author: JCloudYu
+ *	Create: 2020/06/28
+**/
+exports.TrimId = (() => {
     "use strict";
     // See http://www.isthe.com/chongo/tech/comp/fnv/#FNV-param for the definition of these parameters;
     const FNV_PRIME_HIGH = 0x0100, FNV_PRIME_LOW = 0x0193; // 16777619 0x01000193

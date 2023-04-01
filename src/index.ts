@@ -1,4 +1,3 @@
-import Consts = require('./consts.js');
-import Server from "./server.js";
-
-export = Object.freeze(Object.assign({Server}, Consts));
+export * from './consts.js';
+export * from './server.js';
+export * from './client.js';

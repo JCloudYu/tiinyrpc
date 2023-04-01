@@ -1,10 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const http = require("http");
-const events = require("events");
-const beson = require("beson");
-const Consts = require("./consts.js");
-const { ErrorCode, Stage } = Consts;
+exports.Server = void 0;
+const http_1 = __importDefault(require("http"));
+const events_1 = __importDefault(require("events"));
+const beson_1 = __importDefault(require("beson"));
+const consts_js_1 = require("./consts.js");
 ;
 ;
 ;
@@ -14,20 +17,25 @@ const { ErrorCode, Stage } = Consts;
 ;
 ;
 const _Server = new WeakMap();
-class Server extends events.EventEmitter {
+class Server extends events_1.default.EventEmitter {
     static init(callmap, options) {
         return new Server(callmap, options);
     }
     constructor(callmap, options) {
         super();
         options = (options && Object(options) === options) ? options : {};
-        const server = http.createServer();
+        if (options.audit !== undefined && typeof options.audit !== "function") {
+            throw new TypeError("Input preprocess field must be a function!");
+        }
+        const server = http_1.default.createServer();
         _Server.set(this, {
             callmap, server,
-            max_body: options.max_body || 0
+            max_body: options.max_body || 0,
+            auditor: options.audit || DefaultPreprocessor
         });
         BindServerEvents.call(this, server);
     }
+    get is_listening() { return _Server.get(this).server.listening; }
     insert(call, handler) {
         _Server.get(this).callmap[call] = handler;
         return this;
@@ -57,9 +65,15 @@ class Server extends events.EventEmitter {
             }
         });
     }
+    release() {
+        return new Promise((res, rej) => {
+            _Server.get(this).server.close((err) => err ? rej(err) : res());
+        });
+    }
 }
-exports.default = Server;
+exports.Server = Server;
 ;
+function DefaultPreprocessor() { }
 function BindServerEvents(server) {
     const __Server = _Server.get(this);
     server.on('request', (req, res) => {
@@ -70,8 +84,8 @@ function BindServerEvents(server) {
                 WriteResponse(res, 405, "application/json", {
                     rpc: "1.0",
                     error: {
-                        stage: Stage.PAYLOAD_PARSER,
-                        code: ErrorCode.UNSUPPORTED_METHOD,
+                        stage: consts_js_1.Stage.PAYLOAD_PARSER,
+                        code: consts_js_1.ErrorCode.UNSUPPORTED_METHOD,
                         message: "This server accepts only POST method!",
                         detail: { method: req.method }
                     }
@@ -83,8 +97,8 @@ function BindServerEvents(server) {
                 WriteResponse(res, 400, "application/json", {
                     rpc: "1.0",
                     error: {
-                        stage: Stage.PAYLOAD_PARSER,
-                        code: ErrorCode.PAYLOAD_IS_TOO_LARGE,
+                        stage: consts_js_1.Stage.PAYLOAD_PARSER,
+                        code: consts_js_1.ErrorCode.PAYLOAD_IS_TOO_LARGE,
                         message: "Your request payload is too large!",
                         detail: {
                             payload: result.total_size,
@@ -108,8 +122,8 @@ function BindServerEvents(server) {
                         WriteResponse(res, 400, "application/json", {
                             rpc: "1.0",
                             error: {
-                                stage: Stage.PAYLOAD_PARSER,
-                                code: ErrorCode.INVALID_PAYLOAD_FORMAT,
+                                stage: consts_js_1.Stage.PAYLOAD_PARSER,
+                                code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
                                 message: "Provided body content is not a valid JSON!"
                             }
                         });
@@ -118,13 +132,13 @@ function BindServerEvents(server) {
                 }
                 else if (content_type.mime === "application/beson") {
                     mime = content_type.mime;
-                    payload = beson.Deserialize(result);
+                    payload = beson_1.default.Deserialize(result);
                     if (payload === undefined) {
                         WriteResponse(res, 400, "application/json", {
                             rpc: "1.0",
                             error: {
-                                stage: Stage.PAYLOAD_PARSER,
-                                code: ErrorCode.INVALID_PAYLOAD_FORMAT,
+                                stage: consts_js_1.Stage.PAYLOAD_PARSER,
+                                code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
                                 message: "Provided body content is not a valid BESON!"
                             }
                         });
@@ -135,8 +149,8 @@ function BindServerEvents(server) {
                     WriteResponse(res, 400, "application/json", {
                         rpc: "1.0",
                         error: {
-                            stage: Stage.PAYLOAD_PARSER,
-                            code: ErrorCode.INVALID_PAYLOAD_FORMAT,
+                            stage: consts_js_1.Stage.PAYLOAD_PARSER,
+                            code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
                             message: "Unspported payload mime type!"
                         }
                     });
@@ -148,8 +162,8 @@ function BindServerEvents(server) {
                 WriteResponse(res, 400, "application/json", {
                     rpc: "1.0",
                     error: {
-                        stage: Stage.PAYLOAD_PARSER,
-                        code: ErrorCode.INVALID_PAYLOAD_FORMAT,
+                        stage: consts_js_1.Stage.PAYLOAD_PARSER,
+                        code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
                         message: "Unspported payload mime type!",
                         detail: { type: typeof payload }
                     }
@@ -175,8 +189,8 @@ function BindServerEvents(server) {
                     WriteResponse(res, 400, "application/json", {
                         rpc: "1.0",
                         error: {
-                            stage: Stage.PAYLOAD_PARSER,
-                            code: ErrorCode.INVALID_PAYLOAD_FORMAT,
+                            stage: consts_js_1.Stage.PAYLOAD_PARSER,
+                            code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
                             message: "Your payload content is invalid!",
                             detail: errors
                         }
@@ -184,13 +198,27 @@ function BindServerEvents(server) {
                     return;
                 }
             }
+            const auditor = __Server.auditor;
+            const is_go = await auditor(req, payload);
+            if (is_go !== true) {
+                WriteResponse(res, 403, mime, {
+                    rpc: "1.0",
+                    error: {
+                        stage: consts_js_1.Stage.CALL_AUDIT,
+                        code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
+                        message: "You're not allowed to perform this operation!",
+                        detail: { info: is_go }
+                    }
+                });
+                return;
+            }
             const func = __Server.callmap[payload.call];
             if (typeof func !== "function") {
                 WriteResponse(res, 404, mime, {
                     rpc: "1.0",
                     error: {
-                        stage: Stage.CALL_EXEC,
-                        code: ErrorCode.CALL_NOT_FOUND,
+                        stage: consts_js_1.Stage.CALL_EXEC,
+                        code: consts_js_1.ErrorCode.CALL_NOT_FOUND,
                         message: "Target call is not found!",
                         detail: { call: payload.call }
                     }
@@ -213,8 +241,8 @@ function BindServerEvents(server) {
                         rpc: "1.0",
                         id: payload.id,
                         error: {
-                            stage: Stage.CALL_EXEC,
-                            code: err.code || ErrorCode.CALL_EXEC_ERROR,
+                            stage: consts_js_1.Stage.CALL_EXEC,
+                            code: err.code || consts_js_1.ErrorCode.CALL_EXEC_ERROR,
                             message: err.message,
                             detail: err.detail
                         }
@@ -226,8 +254,8 @@ function BindServerEvents(server) {
                         rpc: "1.0",
                         id: payload.id,
                         error: {
-                            stage: Stage.CALL_EXEC,
-                            code: ErrorCode.CALL_EXEC_ERROR,
+                            stage: consts_js_1.Stage.CALL_EXEC,
+                            code: consts_js_1.ErrorCode.CALL_EXEC_ERROR,
                             message: 'Unknown exception has be caught!',
                             detail: err
                         }
@@ -241,8 +269,8 @@ function BindServerEvents(server) {
             WriteResponse(res, 500, "application/json", {
                 rpc: "1.0",
                 error: {
-                    stage: Stage.UNKNOWN,
-                    code: e.code || ErrorCode.UNEXPECTED_ERROR,
+                    stage: consts_js_1.Stage.UNKNOWN,
+                    code: e.code || consts_js_1.ErrorCode.UNEXPECTED_ERROR,
                     message: e.message
                 }
             });
@@ -290,6 +318,6 @@ function WriteResponse(res, status, mime, body) {
         res.end(JSON.stringify(body));
     }
     else {
-        res.end(beson.Serialize(body));
+        res.end(beson_1.default.Serialize(body));
     }
 }

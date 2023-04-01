@@ -7,7 +7,8 @@
 		"skipLibCheck": true, /* Skip type checking all .d.ts files. */
 		"outDir": "./dist",
 		"rootDir": "./src",
-		"declaration": true
+		"declaration": true,
+		"esModuleInterop": true
 	},
 	"exclude": [ "./dist", "./node_modules" ]
 }
