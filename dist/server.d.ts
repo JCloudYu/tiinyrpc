@@ -11,8 +11,9 @@ interface SyncCall {
 interface AsyncCall {
     (...args: any[]): Promise<any>;
 }
+export declare type CallHandler = SyncCall | AsyncCall;
 export interface CallMap {
-    [func: string]: SyncCall | AsyncCall;
+    [func: string]: CallHandler;
 }
 interface ServerSocketListenOptions {
     port: number;
@@ -25,10 +26,12 @@ export declare type ServerListenOptions = ServerSocketListenOptions | ServerPath
 export declare type RequestPreprocessor = {
     (req: http.IncomingMessage, payload: TRPCRequest): true | any | Promise<true | any>;
 };
-export interface ServerInitOptions {
-    audit?: RequestPreprocessor;
-    max_body?: number;
+export interface ServerScopeOptions {
+    audit?: RequestPreprocessor | null;
 }
+export declare type ServerInitOptions = ServerScopeOptions & {
+    max_body?: number;
+};
 export interface TRPCRequest {
     rpc: "1.0";
     id: string | number;
@@ -51,11 +54,14 @@ export interface TRPCErrorResp {
     };
 }
 export declare class Server extends events.EventEmitter {
-    static init(callmap: CallMap, options?: ServerInitOptions): Server;
-    constructor(callmap: CallMap, options?: ServerInitOptions);
+    static init(options?: ServerInitOptions): Server;
+    get max_body(): number;
+    set max_body(size: number);
     get is_listening(): boolean;
-    insert(call: string, handler: SyncCall | AsyncCall): this;
-    remove(call: string): this;
+    scope(options: ServerScopeOptions): Server;
+    handle(callmap: CallMap): Server;
+    handle(func: string, handler: CallHandler): Server;
+    unhandle(func: string): Server;
     listen(options: ServerListenOptions): Promise<string | net.AddressInfo>;
     release(): Promise<void>;
 }

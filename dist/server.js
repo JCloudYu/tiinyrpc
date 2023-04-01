@@ -16,48 +16,79 @@ const consts_js_1 = require("./consts.js");
 ;
 ;
 ;
-const _Server = new WeakMap();
+const _ServerInst = new WeakMap();
 class Server extends events_1.default.EventEmitter {
-    static init(callmap, options) {
-        return new Server(callmap, options);
+    static init(options) {
+        const server = new Server();
+        const session = {
+            callmap: {},
+            max_body: options?.max_body || 0,
+            server: http_1.default.createServer()
+        };
+        _ServerInst.set(server, Object.assign({ session: null, max_body: 0, audit: null }, options, { session }));
+        BindMessageProcessor.call(server);
+        return server;
     }
-    constructor(callmap, options) {
-        super();
-        options = (options && Object(options) === options) ? options : {};
-        if (options.audit !== undefined && typeof options.audit !== "function") {
-            throw new TypeError("Input preprocess field must be a function!");
+    get max_body() { return _ServerInst.get(this).session.max_body; }
+    set max_body(size) {
+        if (typeof size !== "number" || !Number.isFinite(size) || Number.isNaN(size)) {
+            throw new Error("Property max_body must be a finite number!");
         }
-        const server = http_1.default.createServer();
-        _Server.set(this, {
-            callmap, server,
-            max_body: options.max_body || 0,
-            auditor: options.audit || DefaultPreprocessor
-        });
-        BindServerEvents.call(this, server);
+        _ServerInst.get(this).session.max_body = size;
     }
-    get is_listening() { return _Server.get(this).server.listening; }
-    insert(call, handler) {
-        _Server.get(this).callmap[call] = handler;
+    get is_listening() { return _ServerInst.get(this).session.server.listening; }
+    scope(options) {
+        const instance = new Server();
+        _ServerInst.set(instance, Object.assign({
+            session: null, audit: null
+        }, options, { session: _ServerInst.get(this).session }));
+        return instance;
+    }
+    handle(callmap, handler) {
+        if (typeof callmap === "string") {
+            callmap = { [callmap]: handler };
+        }
+        const _inst = _ServerInst.get(this);
+        const regmap = _inst.session.callmap;
+        for (const func in callmap) {
+            if (regmap[func]) {
+                throw Object.assign(new Error(`Call '${func} has been registered already!'`), {
+                    code: consts_js_1.ErrorCode.CALL_EXISTS,
+                    detail: { func }
+                });
+            }
+            const handler = callmap[func];
+            const handler_type = typeof handler;
+            if (handler_type !== "function") {
+                throw Object.assign(new Error(`Given handler expects function, got ${handler_type}!`), {
+                    code: consts_js_1.ErrorCode.INVALID_HANDLER_TYPE,
+                    detail: { func }
+                });
+            }
+            regmap[func] = { handler, auditor: _inst.audit };
+        }
         return this;
     }
-    remove(call) {
-        delete _Server.get(this).callmap[call];
+    unhandle(func) {
+        const _inst = _ServerInst.get(this);
+        const regmap = _inst.session.callmap;
+        delete regmap[func];
         return this;
     }
     listen(options) {
-        const server = _Server.get(this).server;
         return new Promise((res, rej) => {
+            const server = _ServerInst.get(this).session.server;
             server.once('error', rej);
             // Unix socket
             if ('path' in options) {
-                _Server.get(this).server.listen(options.path, success);
+                server.listen(options.path, success);
                 return;
             }
             if (options.host) {
-                _Server.get(this).server.listen(options.port, options.host, success);
+                server.listen(options.port, options.host, success);
             }
             else {
-                _Server.get(this).server.listen(options.port, success);
+                server.listen(options.port, success);
             }
             function success() {
                 server.off('error', rej);
@@ -67,18 +98,17 @@ class Server extends events_1.default.EventEmitter {
     }
     release() {
         return new Promise((res, rej) => {
-            _Server.get(this).server.close((err) => err ? rej(err) : res());
+            _ServerInst.get(this).session.server.close((err) => err ? rej(err) : res());
         });
     }
 }
 exports.Server = Server;
-;
-function DefaultPreprocessor() { }
-function BindServerEvents(server) {
-    const __Server = _Server.get(this);
-    server.on('request', (req, res) => {
+function BindMessageProcessor() {
+    const __Server = _ServerInst.get(this);
+    const Session = __Server.session;
+    __Server.session.server.on('request', (req, res) => {
         Promise.resolve().then(async () => {
-            const result = await ReadAll(req, __Server.max_body);
+            const result = await ReadAll(req, Session.max_body);
             // Check method
             if (req.method !== "POST") {
                 WriteResponse(res, 405, "application/json", {
@@ -102,7 +132,7 @@ function BindServerEvents(server) {
                         message: "Your request payload is too large!",
                         detail: {
                             payload: result.total_size,
-                            limit: __Server.max_body
+                            limit: Session.max_body
                         }
                     }
                 });
@@ -198,22 +228,8 @@ function BindServerEvents(server) {
                     return;
                 }
             }
-            const auditor = __Server.auditor;
-            const is_go = await auditor(req, payload);
-            if (is_go !== true) {
-                WriteResponse(res, 403, mime, {
-                    rpc: "1.0",
-                    error: {
-                        stage: consts_js_1.Stage.CALL_AUDIT,
-                        code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
-                        message: "You're not allowed to perform this operation!",
-                        detail: { info: is_go }
-                    }
-                });
-                return;
-            }
-            const func = __Server.callmap[payload.call];
-            if (typeof func !== "function") {
+            const call_info = Session.callmap[payload.call];
+            if (!call_info) {
                 WriteResponse(res, 404, mime, {
                     rpc: "1.0",
                     error: {
@@ -225,8 +241,24 @@ function BindServerEvents(server) {
                 });
                 return;
             }
+            const auditor = call_info.auditor;
+            if (typeof auditor === "function") {
+                const is_go = await auditor(req, payload);
+                if (is_go !== true) {
+                    WriteResponse(res, 403, mime, {
+                        rpc: "1.0",
+                        error: {
+                            stage: consts_js_1.Stage.CALL_AUDIT,
+                            code: consts_js_1.ErrorCode.INVALID_PAYLOAD_FORMAT,
+                            message: "You're not allowed to perform this operation!",
+                            detail: { info: is_go }
+                        }
+                    });
+                    return;
+                }
+            }
             try {
-                const result = await func(...payload.args);
+                const result = await call_info.handler.call(null, ...payload.args);
                 WriteResponse(res, 200, mime, {
                     rpc: "1.0",
                     id: payload.id,
@@ -275,8 +307,7 @@ function BindServerEvents(server) {
                 }
             });
         });
-    })
-        .on('error', (e) => this.emit('error', e));
+    });
 }
 function ReadAll(req, max_body = 0) {
     return new Promise((res, rej) => {

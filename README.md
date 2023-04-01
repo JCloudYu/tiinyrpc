@@ -13,28 +13,39 @@ const TiinyRPC = require('tiinyrpc');
 
 // Create a server instance
 const MAX_PAYLOAD_SIZE = ; // 10MB
-const server = TiinyRPC.Server.init({
-	asyncfunc: async function(){
-		return new Promise((res)=>setTimeout(()=>res(true), 5000));
-	},
-	syncfunc: function() {
-		return true;
+const server = TRPC.Server.init({
+	max_body: MAX_PAYLOAD_SIZE,
+	audit:(req, p)=>new Promise((res)=>{
+		console.log("Audit1:", req.headers, p.call);
+		setTimeout(()=>res(true), 2000)
+	})
+})
+.handle({
+	'hi': (name:string)=>{
+		return `Hi! ${name}!`;
 	}
-}, {
-	// max body size is 10 MB
-	max_body:10*1024*1024,
-
-	// request auditing function
-	audit: function(req, p) {
-		// This function allows developers to access additional info 
-		// such as headers or ips
-
-		// Return true to accept the request, reject otherwise
-		return true;
+})
+.scope({
+	audit:(req, p)=>{
+		console.log("Audit2:", req.headers, p.call);
+		return false;
+	}
+})
+.handle('no', ()=>{
+	return `You'll never reach here...!`;
+})
+.handle('echo', ()=>{
+	return `You'll never reach here...!`;
+})
+.scope({audit:null})
+.unhandle('echo')
+.handle({
+	echo: (data:any)=>{
+		return data;
 	}
 });
 
-server.listen({host:'0.0.0.0', port:1234})
+server.listen({host:'127.0.0.1', port:3036})
 .then((r)=>console.log("Server is not listening...", r));
 ```
 

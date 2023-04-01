@@ -8,17 +8,18 @@ import {ErrorCode, Stage} from './consts.js';
 
 interface SyncCall {(...args:any[]):any};
 interface AsyncCall {(...args:any[]):Promise<any>};
-export interface CallMap {[func:string]:SyncCall|AsyncCall};
+export type CallHandler = SyncCall|AsyncCall;
+export interface CallMap {[func:string]:CallHandler};
 
 interface ServerSocketListenOptions {port:number; host?:string;};
 interface ServerPathListenOptions {path:string;};
 export type ServerListenOptions = ServerSocketListenOptions | ServerPathListenOptions;
 
 export type RequestPreprocessor = {(req:http.IncomingMessage, payload:TRPCRequest):true|any|Promise<true|any>};
-export interface ServerInitOptions {
-	audit?:RequestPreprocessor;
-	max_body?:number;
+export interface ServerScopeOptions {
+	audit?:RequestPreprocessor|null;
 }
+export type ServerInitOptions = ServerScopeOptions & {max_body?:number};
 export interface TRPCRequest {
 	rpc:"1.0",
 	id:string|number;
@@ -42,61 +43,117 @@ export interface TRPCErrorResp {
 };
 
 
-interface ServerPrivates {
-	callmap:CallMap;
-	server:http.Server;
+interface InvokeMap {[func:string]: {
+	handler:CallHandler;
+	auditor:RequestPreprocessor|null;
+}}
+interface ServerSession {
+	callmap:InvokeMap;
 	max_body:number;
-	auditor:RequestPreprocessor;
+	server:http.Server;
 }
-const _Server:WeakMap<Server, ServerPrivates> = new WeakMap();
+
+interface ServerInstPrivates {
+	session:ServerSession|null;
+	audit:RequestPreprocessor|null;
+}
+const _ServerInst:WeakMap<Server, ServerInstPrivates> = new WeakMap();
 export class Server extends events.EventEmitter {
-	static init(callmap:CallMap, options?:ServerInitOptions):Server {
-		return new Server(callmap, options);
-	}
-	constructor(callmap:CallMap, options?:ServerInitOptions) {
-		super();
-		
-		options = (options && Object(options) === options) ? options : {};
-		if ( options.audit !== undefined && typeof options.audit !== "function" ) {
-			throw new TypeError("Input preprocess field must be a function!");
+	static init(options?:ServerInitOptions):Server {
+		const server = new Server();
+		const session:ServerSession = {
+			callmap: {},
+			max_body: options?.max_body||0,
+			server:http.createServer()
 		}
+		_ServerInst.set(server, Object.assign(
+			{session:null, max_body:0, audit:null}, 
+			options, 
+			{session}
+		));
 
-		const server = http.createServer();
-		_Server.set(this, {
-			callmap, server,
-			max_body:options.max_body||0,
-			auditor:options.audit||DefaultPreprocessor
-		});
-
-		BindServerEvents.call(this, server);
+		BindMessageProcessor.call(server);
+		return server;
 	}
-	get is_listening() { return _Server.get(this)!.server.listening; }
-	insert(call:string, handler:SyncCall|AsyncCall) {
-		_Server.get(this)!.callmap[call] = handler;
+	get max_body() { return _ServerInst.get(this)!.session!.max_body; }
+	set max_body(size:number) {
+		if ( typeof size !== "number" || !Number.isFinite(size) || Number.isNaN(size) ) {
+			throw new Error("Property max_body must be a finite number!");
+		}
+		
+		_ServerInst.get(this)!.session!.max_body = size;
+	}
+
+	get is_listening() { return _ServerInst.get(this)!.session!.server.listening; }
+	scope(options:ServerScopeOptions):Server {
+		const instance = new Server();
+		_ServerInst.set(instance, Object.assign({
+			session:null, audit:null
+		}, options, {session:_ServerInst.get(this)!.session}));
+		return instance;
+	}
+
+	handle(callmap:CallMap):Server;
+	handle(func:string, handler:CallHandler):Server;
+	handle(callmap:string|CallMap, handler?:CallHandler):Server {
+		if ( typeof callmap === "string" ) {
+			callmap = {[callmap]:handler!};
+		}
+		
+		const _inst = _ServerInst.get(this)!;
+		const regmap = _inst.session!.callmap;
+		for(const func in callmap) {
+			if ( regmap[func] ) {
+				throw Object.assign(new Error(`Call '${func} has been registered already!'`), {
+					code:ErrorCode.CALL_EXISTS,
+					detail:{func}
+				});
+			}
+
+
+
+			const handler = callmap[func];
+			const handler_type = typeof handler;
+			if ( handler_type !== "function" ) {
+				throw Object.assign(new Error(`Given handler expects function, got ${handler_type}!`),{
+					code:ErrorCode.INVALID_HANDLER_TYPE,
+					detail:{func}
+				});
+			}
+
+
+
+			regmap[func] = { handler, auditor:_inst.audit };
+		}
+		
 		return this;
 	}
-	remove(call:string) {
-		delete _Server.get(this)!.callmap[call];
+
+	unhandle(func:string):Server {
+		const _inst = _ServerInst.get(this)!;
+		const regmap = _inst.session!.callmap;
+		delete regmap[func];
 		return this;
 	}
+
 	listen(options:ServerListenOptions):Promise<string|net.AddressInfo> {
-		const server = _Server.get(this)!.server;
 		return new Promise((res, rej)=>{
+			const server = _ServerInst.get(this)!.session!.server;
 			server.once('error', rej);
 
 			// Unix socket
 			if ( 'path' in options ) {
-				_Server.get(this)!.server.listen(options.path, success);
+				server.listen(options.path, success);
 				return;
 			}
 
 
 
 			if ( options.host ) {
-				_Server.get(this)!.server.listen(options.port, options.host, success);
+				server.listen(options.port, options.host, success);
 			}
 			else {
-				_Server.get(this)!.server.listen(options.port, success);
+				server.listen(options.port, success);
 			}
 
 			function success() {
@@ -105,21 +162,22 @@ export class Server extends events.EventEmitter {
 			}
 		});
 	}
+
 	release():Promise<void> {
 		return new Promise((res, rej)=>{
-			_Server.get(this)!.server.close((err)=>err?rej(err):res());
+			_ServerInst.get(this)!.session!.server.close((err)=>err?rej(err):res());
 		});
 	}
-};
+}
 
 
 
-function DefaultPreprocessor() {}
-function BindServerEvents(this:Server, server:http.Server) {
-	const __Server = _Server.get(this)!;
-	server.on('request', (req, res)=>{
+function BindMessageProcessor(this:Server) {
+	const __Server = _ServerInst.get(this)!;
+	const Session = __Server.session!;
+	__Server.session!.server.on('request', (req, res)=>{
 		Promise.resolve().then(async()=>{
-			const result = await ReadAll(req, __Server.max_body);
+			const result = await ReadAll(req, Session.max_body);
 
 			// Check method
 			if ( req.method !== "POST" ) {
@@ -145,7 +203,7 @@ function BindServerEvents(this:Server, server:http.Server) {
 						message: "Your request payload is too large!",
 						detail: {
 							payload: result.total_size,
-							limit: __Server.max_body
+							limit: Session.max_body
 						}
 					}
 				});
@@ -253,25 +311,13 @@ function BindServerEvents(this:Server, server:http.Server) {
 				}
 			}
 
-			
-			const auditor = __Server.auditor;
-			const is_go = await auditor(req, payload);
-			if ( is_go !== true ) {
-				WriteResponse(res, 403, mime, {
-					rpc:"1.0",
-					error: {
-						stage:Stage.CALL_AUDIT,
-						code: ErrorCode.INVALID_PAYLOAD_FORMAT,
-						message: "You're not allowed to perform this operation!",
-						detail: { info:is_go }
-					}
-				});
-				return;
-			}
 
 
-			const func = __Server.callmap[payload.call];
-			if ( typeof func !== "function" ) {
+
+
+
+			const call_info = Session.callmap[payload.call];
+			if ( !call_info ) {
 				WriteResponse(res, 404, mime, {
 					rpc:"1.0",
 					error: {
@@ -284,8 +330,30 @@ function BindServerEvents(this:Server, server:http.Server) {
 				return;
 			}
 
+			
+
+			const auditor = call_info.auditor;
+			if ( typeof auditor === "function" ) {
+				const is_go = await auditor(req, payload);
+				if ( is_go !== true ) {
+					WriteResponse(res, 403, mime, {
+						rpc:"1.0",
+						error: {
+							stage:Stage.CALL_AUDIT,
+							code: ErrorCode.INVALID_PAYLOAD_FORMAT,
+							message: "You're not allowed to perform this operation!",
+							detail: { info:is_go }
+						}
+					});
+					return;
+				}
+			}
+
+
+			
+
 			try {
-				const result = await func(...payload.args);
+				const result = await call_info.handler.call(null, ...payload.args);
 				WriteResponse(res, 200, mime, {
 					rpc:"1.0",
 					id:payload.id,
@@ -334,8 +402,7 @@ function BindServerEvents(this:Server, server:http.Server) {
 				}
 			});
 		});
-	})
-	.on('error', (e)=>this.emit('error', e));
+	});
 }
 function ReadAll(req:http.IncomingMessage, max_body:number=0):Promise<Buffer|{remained:Buffer, total_size:number;}> {
 	return new Promise((res, rej)=>{
